@@ -11,6 +11,8 @@ repositories {
 }
 
 dependencies {
+    implementation("org.slf4j:slf4j-simple:2.0.17")
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.14")
     testImplementation(kotlin("test"))
 }
 
