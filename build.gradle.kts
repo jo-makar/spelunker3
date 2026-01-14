@@ -11,8 +11,9 @@ repositories {
 }
 
 dependencies {
-    implementation("org.slf4j:slf4j-jdk14:2.0.17")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.14")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.slf4j:slf4j-jdk14:2.0.17")
     testImplementation(kotlin("test"))
 }
 
