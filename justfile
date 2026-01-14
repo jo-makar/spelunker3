@@ -22,5 +22,5 @@ run jar=default_jar class='com.github.jo_makar.MainBrowserDemo' build='true':
         just build
     fi
 
-    java -jar {{jar}} {{class}} \
-        -Dsimplelogger.properties=src/main/resources/simplelogger.properties
+    java -Djava.util.logging.config.file=src/main/resources/logging.properties \
+        -jar {{jar}} {{class}}
