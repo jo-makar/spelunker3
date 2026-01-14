@@ -28,4 +28,7 @@ tasks.withType<Jar> {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        optIn.add("kotlin.io.path.ExperimentalPathApi")
+    }
 }
