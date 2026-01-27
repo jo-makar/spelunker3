@@ -10,6 +10,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.TimeUnit
 import java.util.Scanner
 
+import kotlin.concurrent.atomics.AtomicInt
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.outputStream
 import kotlinx.coroutines.async
@@ -17,28 +18,42 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 class Chrome private constructor(
     private val scope: CoroutineScope,
     private val tempDir: Path,
-    private val process: Process
+    private val process: Process,
+    private val pipeFlow: SharedFlow<String>,
+    private val cmdFlow: MutableSharedFlow<String>
 ): AutoCloseable {
+    private var cmdId = AtomicInt(0)
+
     companion object {
         private val logger = KotlinLogging.logger {}
 
-        suspend fun create(
-            scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
-            profile: String = "scraper",
-            headless: Boolean = true
-        ): Chrome {
+        suspend fun create(profile: String = "scraper", headless: Boolean = true): Chrome {
+            val scope = CoroutineScope(Dispatchers.Default)
+            val pipeFlow = MutableSharedFlow<String>()
+            val cmdFlow = MutableSharedFlow<String>()
+
             var success = false
             var tempDir: Path? = null
             var process: Process? = null
 
             try {
-                tempDir = Files.createTempDirectory("spelunker3-chrome-")
+                tempDir = withContext(Dispatchers.IO) {
+                    Files.createTempDirectory("spelunker3-chrome-")
+                }
                 logger.info { "temp dir: $tempDir" }
 
                 val inputPipePath = tempDir.resolve("input-pipe")
@@ -51,7 +66,7 @@ class Chrome private constructor(
 
                 val command = buildString {
                     append("google-chrome ")
-                    append("--remote-debugging-port ")
+                    append("--remote-debugging-pipe ")
                     // A non-standard --user-data-dir is required for use with --remote-debugging-port/pipe
                     // Ref: https://developer.chrome.com/blog/remote-debugging-port
                     append("--user-data-dir=${System.getenv("HOME")!!}/.config/google-chrome-$profile ")
@@ -61,9 +76,11 @@ class Chrome private constructor(
                     append("3<$inputPipePath 4>$outputPipePath")
                 }
 
-                process = ProcessBuilder("sh", "-c", command)
-                    .redirectErrorStream(true)
-                    .start()
+                process = withContext(Dispatchers.IO) {
+                    ProcessBuilder("sh", "-c", command)
+                        .redirectErrorStream(true)
+                        .start()
+                }
                 logger.info { "process started with pid = ${process.pid()}" }
 
                 scope.launch {
@@ -82,20 +99,24 @@ class Chrome private constructor(
                         while (scanner.hasNext()) {
                             val line = scanner.next()
                             logger.info { "input: $line" }
-                            // FIXME Write to a circular buffer (guarded by a mutex)
+                            pipeFlow.emit(line)
                         }
                         logger.warn { "input pipe eof" }
                     }
                 }
 
                 scope.launch {
-                    // FIXME Read from a queue (guarded by a mutex?) and write to the output stream
                     inputPipePath.outputStream().use { outputStream ->
-                        // FIXME outputStream.write(/*...*/.toByteArray()) then flush()
+                        cmdFlow.asSharedFlow().collect { entry ->
+                            withContext(Dispatchers.IO) {
+                                outputStream.write(entry.toByteArray())
+                                outputStream.write(0)
+                                outputStream.flush()
+                            }
+                            logger.info { "cmd: $entry" }
+                        }
                     }
                 }
-
-                delay(15000)
 
                 success = true
             } finally {
@@ -108,7 +129,20 @@ class Chrome private constructor(
                     tempDir?.deleteRecursively()
                 }
             }
-            return Chrome(scope, tempDir, process)
+
+            val chrome = Chrome(scope, tempDir, process, pipeFlow.asSharedFlow(), cmdFlow)
+            delay(5000)
+
+            // FIXME STOPPED
+            chrome.sendCmd("Browser.getVersion")
+
+            // FIXME How to handle sessions?  Since multiple may be active at any given time by multiple coroutines
+            //chrome.sendCmd("Target.getTargets")
+            //chrome.sendCmd("Target.attachToTarget")
+            //chrome.sendCmd("Page.enable")
+            delay(15000) // FIXME Remove
+
+            return chrome
         }
 
         private fun executeCommand(command: List<String>, timeoutMs: Long = 5000): Boolean {
@@ -164,5 +198,29 @@ class Chrome private constructor(
         }
 
         tempDir.deleteRecursively()
+    }
+
+    suspend fun sendCmd(
+        method: String,
+        sessionId: String? = null,
+        params: Map<String, JsonElement> = emptyMap(),
+        timeoutMs: Long = 5000
+    ) {
+        val cmd: Map<String, JsonElement> = buildMap {
+            put("id", JsonPrimitive(cmdId.fetchAndAdd(1)))
+            put("method", JsonPrimitive(method))
+            if (sessionId != null)
+                put("sessionId", JsonPrimitive(sessionId))
+            if (params.isNotEmpty())
+                put("params", buildJsonObject {
+                    params.forEach {
+                        put(it.key, it.value)
+                    }
+                })
+        }
+
+        cmdFlow.emit(Json.encodeToString(cmd))
+
+        // FIXME STOPPED Now temporarily collect on pipeFlow for the response (within the timeout)
     }
 }

@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.2.20"
+    kotlin("plugin.serialization") version "2.2.20"
     id("com.gradleup.shadow") version "9.2.2"
 }
 
@@ -13,6 +14,7 @@ repositories {
 dependencies {
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.14")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     implementation("org.slf4j:slf4j-jdk14:2.0.17")
     testImplementation(kotlin("test"))
 }
@@ -30,6 +32,7 @@ tasks.withType<Jar> {
 kotlin {
     jvmToolchain(21)
     compilerOptions {
+        optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
         optIn.add("kotlin.io.path.ExperimentalPathApi")
     }
 }
