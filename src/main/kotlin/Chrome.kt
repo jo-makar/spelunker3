@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,6 +43,7 @@ class Chrome private constructor(
     private val cmdFlow: MutableSharedFlow<String>
 ): AutoCloseable {
     private var cmdId = AtomicInt(0)
+    private var targetToSessionMap: MutableMap<String, String> = mutableMapOf()
 
     companion object {
         private val logger = KotlinLogging.logger {}
@@ -182,27 +184,50 @@ class Chrome private constructor(
             val chrome = Chrome(scope, tempDir, process, pipeFlow.asSharedFlow(), cmdFlow)
             delay(5000)
 
-            // FIXME STOPPED How to handle sessions?  Since multiple may be active at any given time by multiple coroutines
-            //chrome.sendCmd("Target.getTargets")
-            //chrome.sendCmd("Target.attachToTarget")
-            //chrome.sendCmd("Page.enable")
-
-            // FIXME This cannot be done until attached?
-            /*
-            val userAgent: String = run {
-                val resp = chrome.sendCmd("Browser.getVersion")["userAgent"]
-                when {
-                    resp == null -> throw IllegalStateException("missing userAgent: $resp")
-                    resp is JsonPrimitive && resp.isString -> resp.toString()
-                    else -> throw IllegalStateException("unexpected userAgent type: $resp")
+            val targetPages: List<JsonObject> = run {
+                val resp = chrome.sendCmd("Target.getTargets")
+                when(val targets = resp["targetInfos"]) {
+                    null -> throw IllegalStateException("missing targetInfos: $resp")
+                    is JsonArray -> {
+                        targets
+                            .filter {
+                                it is JsonObject &&
+                                it["type"] == JsonPrimitive("page")
+                            }
+                            .map { it as JsonObject }
+                            .toList()
+                    }
+                    else -> throw IllegalStateException("unexpected targetInfos type: $resp")
                 }
             }
+            if (targetPages.isEmpty()) {
+                throw IllegalStateException("no page targets found")
+            }
 
-            chrome.sendCmd(
-                "Network.setUserAgentOverride",
-                params = mapOf("userAgent" to JsonPrimitive(userAgent.replace("HeadlessChrome", "Chrome")))
-            )
-            */
+            val targetId = run {
+                val first = targetPages.first()
+                when(val id = first["targetId"]) {
+                    null -> throw IllegalStateException("missing targetId: $first")
+                    is JsonPrimitive if id.isString -> id.content
+                    else -> throw IllegalStateException("unexpected targetId type: $first")
+                }
+            }
+            val sessionId = run {
+                val resp = chrome.sendCmd(
+                    "Target.attachToTarget",
+                    params = mapOf(
+                        "targetId" to JsonPrimitive(targetId),
+                        "flatten" to JsonPrimitive(true)
+                    )
+                )
+                when(val id = resp["sessionId"]) {
+                    null -> throw IllegalStateException("missing sessionId: $resp")
+                    is JsonPrimitive if id.isString -> id.content
+                    else -> throw IllegalStateException("unexpected sessionId type: $resp")
+                }
+            }
+            chrome.targetToSessionMap[targetId] = sessionId
+            chrome.setupSession(sessionId)
 
             return chrome
         }
@@ -281,8 +306,13 @@ class Chrome private constructor(
         val cmd: Map<String, JsonElement> = buildMap {
             put("id", JsonPrimitive(cmdId.fetchAndAdd(1)))
             put("method", JsonPrimitive(method))
-            if (sessionId != null)
+
+            if (sessionId != null) {
                 put("sessionId", JsonPrimitive(sessionId))
+            } else if (targetToSessionMap.size == 1) {
+                put("sessionId", JsonPrimitive(targetToSessionMap.entries.first().value))
+            }
+
             if (params.isNotEmpty())
                 put("params", buildJsonObject {
                     params.forEach {
@@ -309,4 +339,81 @@ class Chrome private constructor(
             else -> throw IllegalStateException("unexpected result type: $resp")
         }
     }
+
+    private fun setupSession(sessionId: String) {
+        runBlocking {
+            sendCmd("Page.enable", sessionId)
+
+            val userAgent: String = run {
+                when(val resp = sendCmd("Browser.getVersion", sessionId)["userAgent"]) {
+                    null -> throw IllegalStateException("missing userAgent: $resp")
+                    is JsonPrimitive if resp.isString -> resp.toString()
+                    else -> throw IllegalStateException("unexpected userAgent type: $resp")
+                }
+            }
+            val newUserAgent = userAgent.replace("HeadlessChrome", "Chrome")
+
+            sendCmd(
+                "Network.setUserAgentOverride",
+                sessionId,
+                mapOf("userAgent" to JsonPrimitive(newUserAgent))
+            )
+        }
+    }
+
+    fun newTab(): String {
+        return runBlocking {
+            val targetId: String = run {
+                val resp = sendCmd(
+                    "Target.createTarget",
+                    params = mapOf(
+                        "url" to JsonPrimitive("about:blank"),
+                        "newWindow" to JsonPrimitive(false)
+                    )
+                )
+                when(val id = resp["targetId"]) {
+                    null -> throw IllegalStateException("missing targetId: $resp")
+                    is JsonPrimitive if id.isString -> id.content
+                    else -> throw IllegalStateException("unexpected targetId type: $resp")
+                }
+            }
+
+            val sessionId = run {
+                val resp = sendCmd(
+                    "Target.attachToTarget",
+                    params = mapOf(
+                        "targetId" to JsonPrimitive(targetId),
+                        "flatten" to JsonPrimitive(true)
+                    )
+                )
+                when(val id = resp["sessionId"]) {
+                    null -> throw IllegalStateException("missing sessionId: $resp")
+                    is JsonPrimitive if id.isString -> id.content
+                    else -> throw IllegalStateException("unexpected sessionId type: $resp")
+                }
+            }
+
+            targetToSessionMap[targetId] = sessionId
+            setupSession(sessionId)
+            sessionId
+        }
+    }
+
+    fun closeTab(sessionId: String) {
+        var targetId: String? = null
+        for ((entryTargetId, entrySessionId) in targetToSessionMap) {
+            if (entrySessionId == sessionId) {
+                targetId = entryTargetId
+                break
+            }
+        }
+        if (targetId == null)
+            throw IllegalStateException("session id not found: $sessionId")
+
+        targetToSessionMap.remove(targetId)
+        runBlocking { sendCmd("Target.closeTarget", sessionId) }
+    }
+
+    // FIXME STOPPED navigate(url, referer, timeout=60s)
+    //               evaluate(expr, timeout=5s)
 }
