@@ -4,11 +4,13 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.TimeUnit
-import java.util.Scanner
 
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.io.path.deleteRecursively
@@ -19,21 +21,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 class Chrome private constructor(
     private val scope: CoroutineScope,
     private val tempDir: Path,
     private val process: Process,
-    private val pipeFlow: SharedFlow<String>,
+    private val pipeFlow: SharedFlow<JsonObject>,
     private val cmdFlow: MutableSharedFlow<String>
 ): AutoCloseable {
     private var cmdId = AtomicInt(0)
@@ -42,8 +47,8 @@ class Chrome private constructor(
         private val logger = KotlinLogging.logger {}
 
         suspend fun create(profile: String = "scraper", headless: Boolean = true): Chrome {
-            val scope = CoroutineScope(Dispatchers.Default)
-            val pipeFlow = MutableSharedFlow<String>()
+            val scope = CoroutineScope(Dispatchers.IO)
+            val pipeFlow = MutableSharedFlow<JsonObject>()
             val cmdFlow = MutableSharedFlow<String>()
 
             var success = false
@@ -51,7 +56,7 @@ class Chrome private constructor(
             var process: Process? = null
 
             try {
-                tempDir = withContext(Dispatchers.IO) {
+                tempDir = scope.run {
                     Files.createTempDirectory("spelunker3-chrome-")
                 }
                 logger.info { "temp dir: $tempDir" }
@@ -76,7 +81,7 @@ class Chrome private constructor(
                     append("3<$inputPipePath 4>$outputPipePath")
                 }
 
-                process = withContext(Dispatchers.IO) {
+                process = scope.run {
                     ProcessBuilder("sh", "-c", command)
                         .redirectErrorStream(true)
                         .start()
@@ -92,14 +97,58 @@ class Chrome private constructor(
                     }
                 }
 
+                // NB Messages (commands, responses, events) are delimited by the null byte
+                // Ref: https://github.com/cyrus-and/chrome-remote-interface/issues/381
+
                 scope.launch {
-                    // Ref: https://github.com/cyrus-and/chrome-remote-interface/issues/381
-                    Scanner(outputPipePath.toFile()).use { scanner ->
-                        scanner.useDelimiter("\u0000")
-                        while (scanner.hasNext()) {
-                            val line = scanner.next()
-                            logger.info { "input: $line" }
-                            pipeFlow.emit(line)
+                    // Using FileChannel directly (rather than FileInputStream) to avoid buffering issues,
+                    // ie FileChannel will return partial buffer fills rather than block until full (or EOF).
+
+                    FileChannel.open(outputPipePath, StandardOpenOption.READ).use { fileChannel ->
+                        val buffer = ByteBuffer.allocate(1024)
+
+                        fun ByteBuffer.indexOf(b: Byte): Int {
+                            for (i in position()..<limit()) {
+                                if (get(i) == b)
+                                    return i
+                            }
+                            return -1
+                        }
+
+                        while (true) {
+                            val bytesRead = fileChannel.read(buffer)
+                            when (bytesRead) {
+                                -1 -> break
+                                0 -> delay(100)
+                                else -> {
+                                    buffer.flip()
+                                    while (true) {
+                                        when (val idx = buffer.indexOf(0)) {
+                                            -1 -> break
+                                            else -> {
+                                                val entryBytes = ByteArray(idx)
+                                                buffer.get(entryBytes)
+                                                buffer.get() // Null byte
+
+                                                // NB Malformed input is replaced with the Unicode replacement char
+                                                val entryString = String(entryBytes, Charsets.UTF_8)
+                                                logger.info { "input: $entryString" }
+
+                                                val entryObject: JsonObject? = try {
+                                                    Json.decodeFromString(entryString)
+                                                } catch (e: Exception) {
+                                                    logger.error(e) { "failed to deserialize: $entryString" }
+                                                    null
+                                                }
+                                                if (entryObject != null) {
+                                                    pipeFlow.emit(entryObject)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    buffer.compact()
+                                }
+                            }
                         }
                         logger.warn { "input pipe eof" }
                     }
@@ -108,7 +157,7 @@ class Chrome private constructor(
                 scope.launch {
                     inputPipePath.outputStream().use { outputStream ->
                         cmdFlow.asSharedFlow().collect { entry ->
-                            withContext(Dispatchers.IO) {
+                            scope.run {
                                 outputStream.write(entry.toByteArray())
                                 outputStream.write(0)
                                 outputStream.flush()
@@ -133,14 +182,27 @@ class Chrome private constructor(
             val chrome = Chrome(scope, tempDir, process, pipeFlow.asSharedFlow(), cmdFlow)
             delay(5000)
 
-            // FIXME STOPPED
-            chrome.sendCmd("Browser.getVersion")
-
-            // FIXME How to handle sessions?  Since multiple may be active at any given time by multiple coroutines
+            // FIXME STOPPED How to handle sessions?  Since multiple may be active at any given time by multiple coroutines
             //chrome.sendCmd("Target.getTargets")
             //chrome.sendCmd("Target.attachToTarget")
             //chrome.sendCmd("Page.enable")
-            delay(15000) // FIXME Remove
+
+            // FIXME This cannot be done until attached?
+            /*
+            val userAgent: String = run {
+                val resp = chrome.sendCmd("Browser.getVersion")["userAgent"]
+                when {
+                    resp == null -> throw IllegalStateException("missing userAgent: $resp")
+                    resp is JsonPrimitive && resp.isString -> resp.toString()
+                    else -> throw IllegalStateException("unexpected userAgent type: $resp")
+                }
+            }
+
+            chrome.sendCmd(
+                "Network.setUserAgentOverride",
+                params = mapOf("userAgent" to JsonPrimitive(userAgent.replace("HeadlessChrome", "Chrome")))
+            )
+            */
 
             return chrome
         }
@@ -180,22 +242,32 @@ class Chrome private constructor(
     }
 
     override fun close() {
+        runBlocking {
+            sendCmd("Browser.close", timeoutMs = 15000)
+        }
+
         scope.cancel()
 
-        process.let {
-            fun destroy(handle: ProcessHandle, timeoutMs: Long = 15000) {
-                handle.destroy()
-                try {
-                    handle.onExit().get(timeoutMs, TimeUnit.MILLISECONDS)
-                } catch (_: TimeoutException) {
-                    logger.error { "process ${handle.pid()} destroy timeout, forcibly destroyed" }
-                    handle.destroyForcibly()
+        process
+            .takeIf(Process::isAlive)
+            ?.let {
+                fun destroy(handle: ProcessHandle, timeoutMs: Long = 15000) {
+                    handle.destroy()
+                    try {
+                        handle.onExit().get(timeoutMs, TimeUnit.MILLISECONDS)
+                    } catch (_: TimeoutException) {
+                        logger.error { "process ${handle.pid()} destroy timeout, forcibly destroyed" }
+                        handle.destroyForcibly()
+                    }
+                }
+
+                it.descendants()
+                    .filter(ProcessHandle::isAlive)
+                    .forEach { handle -> destroy(handle) }
+                if (it.isAlive) {
+                    destroy(it.toHandle())
                 }
             }
-
-            it.descendants().forEach { handle -> destroy(handle) }
-            destroy(it.toHandle())
-        }
 
         tempDir.deleteRecursively()
     }
@@ -205,7 +277,7 @@ class Chrome private constructor(
         sessionId: String? = null,
         params: Map<String, JsonElement> = emptyMap(),
         timeoutMs: Long = 5000
-    ) {
+    ): JsonObject {
         val cmd: Map<String, JsonElement> = buildMap {
             put("id", JsonPrimitive(cmdId.fetchAndAdd(1)))
             put("method", JsonPrimitive(method))
@@ -219,8 +291,22 @@ class Chrome private constructor(
                 })
         }
 
-        cmdFlow.emit(Json.encodeToString(cmd))
+        val deferredResp = scope.async {
+            pipeFlow
+                .filter { it["id"] == cmd["id"] }
+                .first()
+        }
 
-        // FIXME STOPPED Now temporarily collect on pipeFlow for the response (within the timeout)
+        cmdFlow.emit(Json.encodeToString(cmd))
+        val resp = withTimeout(timeoutMs) {
+            deferredResp.await()
+        }
+        logger.info { "resp: $resp" }
+
+        when (val respResult = resp["result"]) {
+            null -> throw IllegalStateException("missing result: $resp")
+            is JsonObject -> return respResult
+            else -> throw IllegalStateException("unexpected result type: $resp")
+        }
     }
 }
