@@ -9,6 +9,7 @@ import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.TimeUnit
 
@@ -43,7 +44,7 @@ class Chrome private constructor(
     private val cmdFlow: MutableSharedFlow<String>
 ): AutoCloseable {
     private var cmdId = AtomicInt(0)
-    private var targetToSessionMap: MutableMap<String, String> = mutableMapOf()
+    private var targetToSessionMap = ConcurrentHashMap<String, String>()
 
     companion object {
         private val logger = KotlinLogging.logger {}
@@ -109,10 +110,10 @@ class Chrome private constructor(
                     FileChannel.open(outputPipePath, StandardOpenOption.READ).use { fileChannel ->
                         val buffer = ByteBuffer.allocate(1024)
 
-                        fun ByteBuffer.indexOf(b: Byte): Int {
+                        fun ByteBuffer.indexOfFromPosition(b: Byte): Int {
                             for (i in position()..<limit()) {
                                 if (get(i) == b)
-                                    return i
+                                    return i - position()
                             }
                             return -1
                         }
@@ -125,7 +126,7 @@ class Chrome private constructor(
                                 else -> {
                                     buffer.flip()
                                     while (true) {
-                                        when (val idx = buffer.indexOf(0)) {
+                                        when (val idx = buffer.indexOfFromPosition(0)) {
                                             -1 -> break
                                             else -> {
                                                 val entryBytes = ByteArray(idx)
@@ -267,7 +268,7 @@ class Chrome private constructor(
     }
 
     override fun close() {
-        runBlocking {
+        runBlocking(scope.coroutineContext) {
             sendCmd("Browser.close", timeoutMs = 15000)
         }
 
@@ -297,6 +298,7 @@ class Chrome private constructor(
         tempDir.deleteRecursively()
     }
 
+    // Ref: https://chromedevtools.github.io/devtools-protocol/
     suspend fun sendCmd(
         method: String,
         sessionId: String? = null,
@@ -340,66 +342,62 @@ class Chrome private constructor(
         }
     }
 
-    private fun setupSession(sessionId: String) {
-        runBlocking {
-            sendCmd("Page.enable", sessionId)
+    private suspend fun setupSession(sessionId: String) {
+        sendCmd("Page.enable", sessionId)
 
-            val userAgent: String = run {
-                when(val resp = sendCmd("Browser.getVersion", sessionId)["userAgent"]) {
-                    null -> throw IllegalStateException("missing userAgent: $resp")
-                    is JsonPrimitive if resp.isString -> resp.toString()
-                    else -> throw IllegalStateException("unexpected userAgent type: $resp")
-                }
+        val userAgent: String = run {
+            when(val resp = sendCmd("Browser.getVersion", sessionId)["userAgent"]) {
+                null -> throw IllegalStateException("missing userAgent: $resp")
+                is JsonPrimitive if resp.isString -> resp.toString()
+                else -> throw IllegalStateException("unexpected userAgent type: $resp")
             }
-            val newUserAgent = userAgent.replace("HeadlessChrome", "Chrome")
+        }
+        val newUserAgent = userAgent.replace("HeadlessChrome", "Chrome")
 
-            sendCmd(
-                "Network.setUserAgentOverride",
-                sessionId,
-                mapOf("userAgent" to JsonPrimitive(newUserAgent))
+        sendCmd(
+            "Network.setUserAgentOverride",
+            sessionId,
+            mapOf("userAgent" to JsonPrimitive(newUserAgent))
+        )
+    }
+
+    suspend fun newTab(): String {
+        val targetId: String = run {
+            val resp = sendCmd(
+                "Target.createTarget",
+                params = mapOf(
+                    "url" to JsonPrimitive("about:blank"),
+                    "newWindow" to JsonPrimitive(false)
+                )
             )
+            when(val id = resp["targetId"]) {
+                null -> throw IllegalStateException("missing targetId: $resp")
+                is JsonPrimitive if id.isString -> id.content
+                else -> throw IllegalStateException("unexpected targetId type: $resp")
+            }
         }
+
+        val sessionId = run {
+            val resp = sendCmd(
+                "Target.attachToTarget",
+                params = mapOf(
+                    "targetId" to JsonPrimitive(targetId),
+                    "flatten" to JsonPrimitive(true)
+                )
+            )
+            when(val id = resp["sessionId"]) {
+                null -> throw IllegalStateException("missing sessionId: $resp")
+                is JsonPrimitive if id.isString -> id.content
+                else -> throw IllegalStateException("unexpected sessionId type: $resp")
+            }
+        }
+
+        targetToSessionMap[targetId] = sessionId
+        setupSession(sessionId)
+        return sessionId
     }
 
-    fun newTab(): String {
-        return runBlocking {
-            val targetId: String = run {
-                val resp = sendCmd(
-                    "Target.createTarget",
-                    params = mapOf(
-                        "url" to JsonPrimitive("about:blank"),
-                        "newWindow" to JsonPrimitive(false)
-                    )
-                )
-                when(val id = resp["targetId"]) {
-                    null -> throw IllegalStateException("missing targetId: $resp")
-                    is JsonPrimitive if id.isString -> id.content
-                    else -> throw IllegalStateException("unexpected targetId type: $resp")
-                }
-            }
-
-            val sessionId = run {
-                val resp = sendCmd(
-                    "Target.attachToTarget",
-                    params = mapOf(
-                        "targetId" to JsonPrimitive(targetId),
-                        "flatten" to JsonPrimitive(true)
-                    )
-                )
-                when(val id = resp["sessionId"]) {
-                    null -> throw IllegalStateException("missing sessionId: $resp")
-                    is JsonPrimitive if id.isString -> id.content
-                    else -> throw IllegalStateException("unexpected sessionId type: $resp")
-                }
-            }
-
-            targetToSessionMap[targetId] = sessionId
-            setupSession(sessionId)
-            sessionId
-        }
-    }
-
-    fun closeTab(sessionId: String) {
+    suspend fun closeTab(sessionId: String) {
         var targetId: String? = null
         for ((entryTargetId, entrySessionId) in targetToSessionMap) {
             if (entrySessionId == sessionId) {
@@ -411,9 +409,39 @@ class Chrome private constructor(
             throw IllegalStateException("session id not found: $sessionId")
 
         targetToSessionMap.remove(targetId)
-        runBlocking { sendCmd("Target.closeTarget", sessionId) }
+        sendCmd("Target.closeTarget", sessionId)
     }
 
-    // FIXME STOPPED navigate(url, referer, timeout=60s)
-    //               evaluate(expr, timeout=5s)
+    suspend fun navigate(
+        url: String,
+        referer: String? = null,
+        sessionId: String? = null,
+        timeoutMs: Long = 60000
+    ) {
+        val params: Map<String, JsonElement> = buildMap {
+            put("url", JsonPrimitive(url))
+            if (referer != null)
+                put("referer", JsonPrimitive(referer))
+        }
+        val resp = sendCmd("Page.navigate", sessionId, params)
+        val frameId = run {
+            when (val id = resp["frameId"]) {
+                null -> throw IllegalStateException("missing sessionId: $resp")
+                is JsonPrimitive if id.isString -> id.content
+                else -> throw IllegalStateException("unexpected sessionId type: $resp")
+            }
+        }
+
+        // FIXME STOPPED
+        println("frameId: $frameId")
+    }
+
+    suspend fun evaluate(
+        expr: String,
+        sessionId: String? = null,
+        timeoutMs: Long = 5000
+    ): JsonElement {
+        // FIXME STOPPED
+        return JsonPrimitive(true)
+    }
 }
