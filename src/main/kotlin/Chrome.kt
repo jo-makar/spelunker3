@@ -111,8 +111,7 @@ class Chrome private constructor(
                     // ie FileChannel will return partial buffer fills rather than block until full (or EOF).
 
                     FileChannel.open(outputPipePath, StandardOpenOption.READ).use { fileChannel ->
-                        // FIXME STOPPED This is where the issue originates (originally 1024 bytes)
-                        val buffer = ByteBuffer.allocate(1024 * 1024)
+                        val buffer = ByteBuffer.allocate(32 * 1024)
 
                         fun ByteBuffer.indexOfFromPosition(b: Byte): Int {
                             for (i in position()..<limit()) {
@@ -125,6 +124,10 @@ class Chrome private constructor(
 
                         while (true) {
                             val bytesRead = fileChannel.read(buffer)
+                            if (buffer.position() == buffer.capacity()) {
+                                throw IllegalStateException("insufficient buffer capacity")
+                            }
+
                             when (bytesRead) {
                                 -1 -> break
                                 0 -> delay(100)
