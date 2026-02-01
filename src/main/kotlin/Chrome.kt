@@ -45,9 +45,8 @@ class Chrome private constructor(
     private val cmdFlow: MutableSharedFlow<String>,
     private val isClosing: AtomicBoolean
 ): AutoCloseable {
-    // FIXME These can be vals can they not?
-    private var cmdId = AtomicInt(0)
-    private var targetToSessionMap = ConcurrentHashMap<String, String>()
+    private val cmdId = AtomicInt(0)
+    private val targetToSessionMap = ConcurrentHashMap<String, String>()
 
     companion object {
         private val logger = KotlinLogging.logger {}
