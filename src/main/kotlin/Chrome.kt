@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.TimeUnit
 
+import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.outputStream
@@ -41,8 +42,10 @@ class Chrome private constructor(
     private val tempDir: Path,
     private val process: Process,
     private val pipeFlow: SharedFlow<JsonObject>,
-    private val cmdFlow: MutableSharedFlow<String>
+    private val cmdFlow: MutableSharedFlow<String>,
+    private val isClosing: AtomicBoolean
 ): AutoCloseable {
+    // FIXME These can be vals can they not?
     private var cmdId = AtomicInt(0)
     private var targetToSessionMap = ConcurrentHashMap<String, String>()
 
@@ -53,6 +56,7 @@ class Chrome private constructor(
             val scope = CoroutineScope(Dispatchers.IO)
             val pipeFlow = MutableSharedFlow<JsonObject>()
             val cmdFlow = MutableSharedFlow<String>()
+            val isClosing = AtomicBoolean(false)
 
             var success = false
             var tempDir: Path? = null
@@ -108,12 +112,14 @@ class Chrome private constructor(
                     // ie FileChannel will return partial buffer fills rather than block until full (or EOF).
 
                     FileChannel.open(outputPipePath, StandardOpenOption.READ).use { fileChannel ->
-                        val buffer = ByteBuffer.allocate(1024)
+                        // FIXME STOPPED This is where the issue originates (originally 1024 bytes)
+                        val buffer = ByteBuffer.allocate(1024 * 1024)
 
                         fun ByteBuffer.indexOfFromPosition(b: Byte): Int {
                             for (i in position()..<limit()) {
-                                if (get(i) == b)
+                                if (get(i) == b) {
                                     return i - position()
+                                }
                             }
                             return -1
                         }
@@ -153,7 +159,9 @@ class Chrome private constructor(
                                 }
                             }
                         }
-                        logger.warn { "input pipe eof" }
+                        if (!isClosing.load()) {
+                            logger.warn { "input pipe eof" }
+                        }
                     }
                 }
 
@@ -182,7 +190,7 @@ class Chrome private constructor(
                 }
             }
 
-            val chrome = Chrome(scope, tempDir, process, pipeFlow.asSharedFlow(), cmdFlow)
+            val chrome = Chrome(scope, tempDir, process, pipeFlow.asSharedFlow(), cmdFlow, isClosing)
             delay(5000)
 
             val targetPages: List<JsonObject> = run {
@@ -268,6 +276,8 @@ class Chrome private constructor(
     }
 
     override fun close() {
+        isClosing.store(true)
+
         runBlocking(scope.coroutineContext) {
             sendCmd("Browser.close", timeoutMs = 15000)
         }
@@ -405,8 +415,9 @@ class Chrome private constructor(
                 break
             }
         }
-        if (targetId == null)
-            throw IllegalStateException("session id not found: $sessionId")
+        if (targetId == null) {
+            throw IllegalStateException("sessionId not found: $sessionId")
+        }
 
         targetToSessionMap.remove(targetId)
         sendCmd("Target.closeTarget", sessionId)
@@ -420,20 +431,30 @@ class Chrome private constructor(
     ) {
         val params: Map<String, JsonElement> = buildMap {
             put("url", JsonPrimitive(url))
-            if (referer != null)
+            if (referer != null) {
                 put("referer", JsonPrimitive(referer))
-        }
-        val resp = sendCmd("Page.navigate", sessionId, params)
-        val frameId = run {
-            when (val id = resp["frameId"]) {
-                null -> throw IllegalStateException("missing sessionId: $resp")
-                is JsonPrimitive if id.isString -> id.content
-                else -> throw IllegalStateException("unexpected sessionId type: $resp")
             }
         }
 
-        // FIXME STOPPED
-        println("frameId: $frameId")
+        val usedSessionId = when {
+            sessionId != null -> sessionId
+            targetToSessionMap.size == 1 -> targetToSessionMap.entries.first().value
+            else -> throw IllegalStateException("sessionId not defined")
+        }
+
+        val deferredEvent = scope.async {
+            val method = JsonPrimitive("Page.loadEventFired")
+            val usedSessionId = JsonPrimitive(usedSessionId)
+            pipeFlow
+                .filter { it["method"] == method && it["sessionId"] == usedSessionId }
+                .first()
+        }
+
+        sendCmd("Page.navigate", sessionId, params)
+        val event = withTimeout(timeoutMs) {
+            deferredEvent.await()
+        }
+        logger.info { "event = $event" }
     }
 
     suspend fun evaluate(
@@ -441,7 +462,21 @@ class Chrome private constructor(
         sessionId: String? = null,
         timeoutMs: Long = 5000
     ): JsonElement {
-        // FIXME STOPPED
-        return JsonPrimitive(true)
+        val resp = sendCmd(
+            "Runtime.evaluate",
+            sessionId,
+            mapOf("expression" to JsonPrimitive(expr)),
+            timeoutMs
+        )
+
+        val result: JsonObject = when (val result = resp["result"]) {
+            null -> throw IllegalStateException("missing result: $resp")
+            !is JsonObject -> throw IllegalStateException("unexpected result type: $resp")
+            else -> result
+        }
+        return when (val value = result["value"]) {
+            null -> throw IllegalStateException("missing value: $resp")
+            else -> value
+        }
     }
 }
