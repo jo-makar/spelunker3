@@ -10,7 +10,7 @@ build:
     ./gradlew shadowJar
 
 default_jar := 'build/libs/spelunker3-1.0.0-SNAPSHOT-all.jar'
-run jar=default_jar class='com.github.jo_makar.MainBrowserDemo' build='true':
+run jar=default_jar class='com.github.jo_makar.MainBrowserDemoKt' build='true' *args:
     #!/bin/bash
     set -o errexit
 
@@ -23,4 +23,8 @@ run jar=default_jar class='com.github.jo_makar.MainBrowserDemo' build='true':
     fi
 
     java -Djava.util.logging.config.file=src/main/resources/logging.properties \
-        -jar {{jar}} {{class}}
+        -cp {{jar}} {{class}} \
+        {{args}}
+
+run-secgov *args:
+    just run {{default_jar}} com.github.jo_makar.MainSecGovScraperKt true {{args}}

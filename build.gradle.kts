@@ -12,6 +12,7 @@ repositories {
 }
 
 dependencies {
+    implementation("com.github.ajalt.clikt:clikt:5.1.0")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.14")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
