@@ -6,11 +6,14 @@ import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.double
 import com.github.jo_makar.scrapers.SecGov
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 import java.time.LocalDate
+import java.util.Collections
+import java.util.TreeSet
 
 import kotlinx.coroutines.runBlocking
 
@@ -28,6 +31,8 @@ class Command : CliktCommand() {
         .convert { LocalDate.parse(it) }
         .default(LocalDate.now())
 
+    val threshold: Double by option().double().default(100_000.0)
+
     override fun run() {
         if (formType != "4") {
             throw BadParameterValue("formType != 4")
@@ -38,8 +43,16 @@ class Command : CliktCommand() {
         logger.info { "start/endDate = $startDate - $endDate" }
 
         runBlocking {
+            val sorted = TreeSet<SecGov.Form4>(Collections.reverseOrder())
             SecGov.scrapeForm4(startDate, endDate).collect { form4 ->
                 logger.info { form4 }
+                if (form4.value > threshold) {
+                    sorted.add(form4)
+                }
+            }
+
+            sorted.forEach {
+                println(String.format("%6s %10.0f %s", it.ticker, it.value, it.url))
             }
         }
     }
