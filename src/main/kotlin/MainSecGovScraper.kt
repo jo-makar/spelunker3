@@ -20,6 +20,7 @@ class Command : CliktCommand() {
     val formType: String by option().default("4")
 
     // Start date is inclusive and end date is exclusive
+    // Expected format: yyyy-mm-dd
     val startDate: LocalDate by option()
         .convert { LocalDate.parse(it) }
         .default(LocalDate.now().minusDays(7))
