@@ -2,13 +2,22 @@
 
 Scraping and data mining framework
 
-## Sources
+## Chrome demo
 
-### SEC.gov
+```kotlin
+fun main() = runBlocking {
+    Chrome.create().use { chrome ->
+        chrome.navigate("https://www.whatsmyip.org")
+        println(chrome.evaluate("document.getElementById(\"ip\").textContent"))
+    }
+}
+```
+
+## SEC.gov
 
 Scrape SEC form 4 filings (insiders) and sort by cost
 
-```
+```sh
 $ just run sec-gov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold=100000]
 ...
   NONE  384099800 https://www.sec.gov/Archives/edgar/data/1956484/0001193125-26-031422.txt
