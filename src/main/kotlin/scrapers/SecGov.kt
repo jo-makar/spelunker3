@@ -89,7 +89,7 @@ class SecGov {
                                     continue
                                 }
 
-                                val filingUrl = "https://www.sec.gov/Archives/" + tokens[4]
+                                val filingUrl = "https://www.sec.gov/Archives/" + tokens[tokens.size - 2]
                                 logger.info { "filingUrl = $filingUrl" }
                                 client.newCall(
                                     Request.Builder().url(filingUrl).build()
