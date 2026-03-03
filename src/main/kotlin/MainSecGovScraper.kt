@@ -1,5 +1,7 @@
 package com.github.jo_makar
 
+import com.github.jo_makar.scrapers.SecGov
+
 import com.github.ajalt.clikt.core.BadParameterValue
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
@@ -7,7 +9,6 @@ import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.double
-import com.github.jo_makar.scrapers.SecGov
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 
@@ -19,7 +20,7 @@ import kotlinx.coroutines.runBlocking
 
 private val logger = KotlinLogging.logger {}
 
-class Command : CliktCommand() {
+class SecGovScraper : CliktCommand() {
     val formType: String by option().default("4")
 
     // Start date is inclusive and end date is exclusive
@@ -31,7 +32,7 @@ class Command : CliktCommand() {
         .convert { LocalDate.parse(it) }
         .default(LocalDate.now())
 
-    val threshold: Double by option().double().default(100_000.0)
+    val threshold: Double by option().double().default(1_000_000.0)
 
     override fun run() {
         if (formType != "4") {
@@ -58,4 +59,4 @@ class Command : CliktCommand() {
     }
 }
 
-fun main(args: Array<String>) = Command().main(args)
+fun main(args: Array<String>) = SecGovScraper().main(args)

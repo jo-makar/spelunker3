@@ -128,13 +128,13 @@ class Chrome private constructor(
                                 throw IllegalStateException("insufficient buffer capacity")
                             }
 
-                            when (bytesRead) {
+                            when(bytesRead) {
                                 -1 -> break
                                 0 -> delay(100)
                                 else -> {
                                     buffer.flip()
                                     while (true) {
-                                        when (val idx = buffer.indexOfFromPosition(0)) {
+                                        when(val idx = buffer.indexOfFromPosition(0)) {
                                             -1 -> break
                                             else -> {
                                                 val entryBytes = ByteArray(idx)
@@ -347,7 +347,7 @@ class Chrome private constructor(
         }
         logger.info { "resp: $resp" }
 
-        when (val respResult = resp["result"]) {
+        when(val respResult = resp["result"]) {
             null -> throw IllegalStateException("missing result: $resp")
             is JsonObject -> return respResult
             else -> throw IllegalStateException("unexpected result type: $resp")
@@ -463,7 +463,7 @@ class Chrome private constructor(
         expr: String,
         sessionId: String? = null,
         timeoutMs: Long = 5000
-    ): JsonElement {
+    ): JsonElement? {
         val resp = sendCmd(
             "Runtime.evaluate",
             sessionId,
@@ -471,14 +471,22 @@ class Chrome private constructor(
             timeoutMs
         )
 
-        val result: JsonObject = when (val result = resp["result"]) {
+        val result: JsonObject = when(val result = resp["result"]) {
             null -> throw IllegalStateException("missing result: $resp")
             !is JsonObject -> throw IllegalStateException("unexpected result type: $resp")
             else -> result
         }
-        return when (val value = result["value"]) {
-            null -> throw IllegalStateException("missing value: $resp")
-            else -> value
+        val type: String = when(val type = result["type"]) {
+            null -> throw IllegalStateException("missing type: $result")
+            is JsonPrimitive if type.isString -> type.content
+            else -> throw IllegalStateException("unexpected type type: $result")
         }
+        val value: JsonElement? = result["value"]
+
+        when(type) {
+            "undefined" -> check(value == null)
+            else -> checkNotNull(value)
+        }
+        return value
     }
 }

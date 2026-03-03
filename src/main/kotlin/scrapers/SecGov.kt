@@ -54,7 +54,7 @@ class SecGov {
             }
 
             val client = OkHttpClient.Builder()
-                .cache(Cache(File("/tmp/spelunker3-secgov"), 500 * 1048576))
+                .cache(Cache(File("/tmp/spelunker3-secgov"), 1024 * 1048576))
                 // Apparently specific user agents formats are whitelisted
                 // Refs: https://stackoverflow.com/a/77766686
                 //       https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data
