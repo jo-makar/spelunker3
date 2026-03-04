@@ -45,7 +45,7 @@ class SecGovScraper : CliktCommand() {
 
         runBlocking {
             val sorted = TreeSet<SecGov.Form4>(Collections.reverseOrder())
-            SecGov.scrapeForm4(startDate, endDate).collect { form4 ->
+            SecGov.scrapeForms4(startDate, endDate).collect { form4 ->
                 logger.info { form4 }
                 if (form4.value > threshold) {
                     sorted.add(form4)

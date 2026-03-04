@@ -34,7 +34,7 @@ class SecGov {
         private val logger = KotlinLogging.logger {}
         private val builder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
 
-        fun scrapeForm4(startDate: LocalDate, endDate: LocalDate): Flow<Form4> {
+        fun scrapeForms4(startDate: LocalDate, endDate: LocalDate): Flow<Form4> {
             fun LocalDate.quarter(): Int = ceil(monthValue.toDouble() / 3).toInt()
 
             fun NodeList.asList(): List<Node> = buildList {

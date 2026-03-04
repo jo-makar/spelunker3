@@ -18,7 +18,7 @@ fun main() = runBlocking {
 Scrape SEC form 4 filings (insiders) and sort by cost
 
 ```sh
-$ just run sec-gov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold=100000]
+$ just run-secgov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold=1000000]
 ...
   NONE  384099800 https://www.sec.gov/Archives/edgar/data/1956484/0001193125-26-031422.txt
    WRB   33087353 https://www.sec.gov/Archives/edgar/data/11544/0001193125-26-032269.txt
@@ -31,4 +31,15 @@ $ just run sec-gov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshol
   MLAA    5100000 https://www.sec.gov/Archives/edgar/data/1303829/0001213900-26-010406.txt
   LIFE    4949975 https://www.sec.gov/Archives/edgar/data/1788451/0001273281-26-000003.txt
 ...
+```
+
+## Alpha Vantage
+
+Scrape historical data
+
+```sh
+$ just run-alphavantage <api-key> [tickers...]
+...
+     S  -33.11% 2026-03-03 $13.27 2025-03-07 $19.84
+  CRWD   17.37% 2026-03-03 $391.42 2025-03-07 $333.50
 ```

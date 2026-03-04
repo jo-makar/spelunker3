@@ -36,5 +36,6 @@ kotlin {
     compilerOptions {
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
         optIn.add("kotlin.io.path.ExperimentalPathApi")
+        optIn.add("kotlinx.serialization.ExperimentalSerializationApi")
     }
 }
