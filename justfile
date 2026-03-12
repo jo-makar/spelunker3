@@ -29,5 +29,6 @@ run jar=default_jar class='com.github.jo_makar.MainBrowserDemoKt' build='true' *
 run-secgov *args:
     just run {{default_jar}} com.github.jo_makar.MainSecGovScraperKt true {{args}}
 
-run-alphavantage *args:
-    just run {{default_jar}} com.github.jo_makar.MainAlphaVantageScraperKt true {{args}}
+run-yahoofinance *args:
+    just run {{default_jar}} com.github.jo_makar.MainYahooFinanceScraperKt true {{args}}
+

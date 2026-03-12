@@ -1,6 +1,6 @@
 package com.github.jo_makar
 
-import com.github.jo_makar.scrapers.AlphaVantage
+import com.github.jo_makar.scrapers.YahooFinance
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
@@ -13,14 +13,13 @@ import kotlinx.coroutines.runBlocking
 
 private val logger = KotlinLogging.logger {}
 
-class MainAlphaVantageScraper : CliktCommand() {
-    val apiKey: String by argument()
+class MainYahooFinanceScraper : CliktCommand() {
     val tickers: List<String> by argument().multiple(required = true)
 
     override fun run() {
         runBlocking {
-            val results = mutableListOf<AlphaVantage.Ticker>()
-            AlphaVantage.scrapeTickers(apiKey, tickers).collect { result ->
+            val results = mutableListOf<YahooFinance.Ticker>()
+            YahooFinance.scrapeTickers(tickers).collect { result ->
                 logger.info { result }
                 results.add(result)
             }
@@ -33,4 +32,4 @@ class MainAlphaVantageScraper : CliktCommand() {
     }
 }
 
-fun main(args: Array<String>) = MainAlphaVantageScraper().main(args)
+fun main(args: Array<String>) = MainYahooFinanceScraper().main(args)

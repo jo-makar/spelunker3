@@ -33,13 +33,12 @@ $ just run-secgov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold
 ...
 ```
 
-## Alpha Vantage
+## Yahoo Finance
 
 Scrape historical data
 
 ```sh
-$ just run-alphavantage <api-key> [tickers...]
+$ just run-yahoofinance [tickers...]
 ...
-     S  -33.11% 2026-03-03 $13.27 2025-03-07 $19.84
-  CRWD   17.37% 2026-03-03 $391.42 2025-03-07 $333.50
+   SPY   21.02% 2026-03-11 $676.33 2025-03-12 $558.87
 ```
