@@ -18,7 +18,7 @@ fun main() = runBlocking {
 Scrape SEC form 4 filings (insiders) and sort by cost
 
 ```sh
-$ just run-secgov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold=1000000]
+$ just run-secgov [--start-date=<yyyy-mm-dd>] [--end-date=<yyyy-mm-dd>] [<options>...]
 ...
   NONE  384099800 https://www.sec.gov/Archives/edgar/data/1956484/0001193125-26-031422.txt
    WRB   33087353 https://www.sec.gov/Archives/edgar/data/11544/0001193125-26-032269.txt
@@ -38,7 +38,7 @@ $ just run-secgov [--start-date=yyyy-mm-dd] [--end-date=yyyy-mm-dd] [--threshold
 Scrape historical data
 
 ```sh
-$ just run-yahoofinance [tickers...]
+$ just run-yahoofinance [<ticker>...]
 ...
    SPY   21.02% 2026-03-11 $676.33 2025-03-12 $558.87
 ```

@@ -1,6 +1,7 @@
 package com.github.jo_makar
 
 import com.github.jo_makar.scrapers.SecGov
+import com.github.jo_makar.scrapers.YahooFinance
 
 import com.github.ajalt.clikt.core.BadParameterValue
 import com.github.ajalt.clikt.core.CliktCommand
@@ -11,6 +12,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.double
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.toList
 
 import java.time.LocalDate
 import java.util.Collections
@@ -32,7 +34,7 @@ class SecGovScraper : CliktCommand() {
         .convert { LocalDate.parse(it) }
         .default(LocalDate.now())
 
-    val threshold: Double by option().double().default(1_000_000.0)
+    val threshold: Double by option().double().default(100_000.0)
 
     override fun run() {
         if (formType != "4") {
@@ -44,16 +46,44 @@ class SecGovScraper : CliktCommand() {
         logger.info { "start/endDate = $startDate - $endDate" }
 
         runBlocking {
-            val sorted = TreeSet<SecGov.Form4>(Collections.reverseOrder())
+            data class Entry(
+                val form: SecGov.Form4,
+                val crs: Double,
+            ): Comparable<Entry> {
+                override fun compareTo(other: Entry): Int = crs.compareTo(other.crs)
+            }
+
+            val sortedEntries = TreeSet<Entry>(Collections.reverseOrder())
+
+            // Comparative Relative Strength: (ticker six-month return) - (market index six-month return)
+            val crsByTicker = mutableMapOf<String, Double>()
+            val indexTickerPctChange = run {
+                val ticker = YahooFinance.scrapeTickers(listOf("spy")).toList().first()
+                (ticker.newClose - ticker.midClose) / ticker.midClose * 100.0
+            }
+
             SecGov.scrapeForms4(startDate, endDate).collect { form4 ->
                 logger.info { form4 }
-                if (form4.value > threshold) {
-                    sorted.add(form4)
+
+                val filter = when {
+                    listOf("N/A", "NONE").contains(form4.ticker) -> true
+                    form4.value < threshold -> true
+                    else -> false
+                }
+                if (!filter) {
+                    if (!crsByTicker.containsKey(form4.ticker)) {
+                        crsByTicker[form4.ticker] = run {
+                            val ticker = YahooFinance.scrapeTickers(listOf(form4.ticker)).toList().first()
+                            (ticker.newClose - ticker.midClose) / ticker.midClose * 100.0 - indexTickerPctChange
+                        }
+                    }
+
+                    sortedEntries.add(Entry(form4, crsByTicker[form4.ticker]!!))
                 }
             }
 
-            sorted.forEach {
-                println(String.format("%6s %10.0f %s", it.ticker, it.value, it.url))
+            sortedEntries.forEach {
+                println(String.format("%6s %6.1f%% $%10.0f %s", it.form.ticker, it.crs, it.form.value, it.form.filingDetailUrl))
             }
         }
     }

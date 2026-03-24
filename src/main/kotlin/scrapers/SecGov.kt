@@ -111,6 +111,13 @@ class SecGov {
                                         .item(0)
                                         .textContent
 
+                                    val ownerTitle = doc.getElementsByTagName("officerTitle").asList()
+                                        .map { it.textContent.trim() }
+                                        .filter { it.isNotEmpty() }
+                                        .joinToString()
+
+                                    val has10b51 = doc.documentElement.textContent.contains("10b5-1", true)
+
                                     var value = 0.0
                                     for (node in (
                                             doc.getElementsByTagName("nonDerivativeTransaction").asList() +
@@ -118,7 +125,7 @@ class SecGov {
                                     )) {
                                         val element = node as Element
 
-                                        val shares = run {
+                                        val count = run {
                                             val nodeList = element.getElementsByTagName("transactionShares")
                                             when {
                                                 nodeList.length == 0 -> 0.0
@@ -146,10 +153,26 @@ class SecGov {
                                             else -> throw IllegalStateException("invalid code: $code")
                                         }
 
-                                        value += shares * price * factor
+                                        value += count * price * factor
                                     }
 
-                                    emit(Form4(date, filingUrl, ticker, value))
+                                    emit(Form4(
+                                        date,
+                                        filingUrl,
+                                        filingUrl.let {
+                                            val baseUrl = it.substringBeforeLast("/")
+                                            val tail = it
+                                                .substringAfterLast("/")
+                                                .substringBefore(".txt")
+                                            val tailNoHyphens = tail.replace("-", "")
+
+                                            "$baseUrl/$tailNoHyphens/$tail-index.html"
+                                        },
+                                        ticker,
+                                        value,
+                                        ownerTitle,
+                                        has10b51,
+                                    ))
                                 }
                             }
                         }
@@ -161,9 +184,12 @@ class SecGov {
 
     data class Form4(
         val date: LocalDate,
-        val url: String,
+        val textUrl: String,
+        val filingDetailUrl: String,
         val ticker: String,
-        val value: Double
+        val value: Double,
+        val ownerTitle: String?,
+        val has10b51: Boolean,
     ): Comparable<Form4> {
         override fun compareTo(other: Form4): Int = value.compareTo(other.value)
     }

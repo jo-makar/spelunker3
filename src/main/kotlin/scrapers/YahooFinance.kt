@@ -113,6 +113,7 @@ class YahooFinance {
                         }
 
                         val oldDate = localDate(timestamps[0])
+                        val midDate = localDate(timestamps[timestamps.size / 2])
                         val newDate = localDate(timestamps[timestamps.size - 1])
                         check(oldDate.isBefore(newDate))
 
@@ -131,12 +132,16 @@ class YahooFinance {
                                 ticker.uppercase(),
                                 newDate,
                                 close(closes[closes.size - 1]),
+                                midDate,
+                                close(closes[closes.size / 2]),
                                 oldDate,
                                 close(closes[0]),
                             )
                         )
 
-                        delay(2000)
+                        if (resp.cacheResponse == null) {
+                            delay(2000)
+                        }
                     }
                 }
             }
@@ -147,6 +152,8 @@ class YahooFinance {
         val ticker: String,
         val newDate: LocalDate,
         val newClose: Double,
+        val midDate: LocalDate,
+        val midClose: Double,
         val oldDate: LocalDate,
         val oldClose: Double,
     )
