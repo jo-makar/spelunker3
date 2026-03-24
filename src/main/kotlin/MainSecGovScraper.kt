@@ -35,6 +35,7 @@ class SecGovScraper : CliktCommand() {
         .default(LocalDate.now())
 
     val threshold: Double by option().double().default(100_000.0)
+    val cik: String? by option()
 
     override fun run() {
         if (formType != "4") {
@@ -50,7 +51,12 @@ class SecGovScraper : CliktCommand() {
                 val form: SecGov.Form4,
                 val crs: Double,
             ): Comparable<Entry> {
-                override fun compareTo(other: Entry): Int = crs.compareTo(other.crs)
+                override fun compareTo(other: Entry): Int =
+                    if (form.ticker != other.form.ticker) {
+                        crs.compareTo(other.crs)
+                    } else {
+                        form.value.compareTo(other.form.value)
+                    }
             }
 
             val sortedEntries = TreeSet<Entry>(Collections.reverseOrder())
@@ -62,7 +68,7 @@ class SecGovScraper : CliktCommand() {
                 (ticker.newClose - ticker.midClose) / ticker.midClose * 100.0
             }
 
-            SecGov.scrapeForms4(startDate, endDate).collect { form4 ->
+            SecGov.scrapeForms4(startDate, endDate, cik).collect { form4 ->
                 logger.info { form4 }
 
                 val filter = when {
@@ -83,7 +89,20 @@ class SecGovScraper : CliktCommand() {
             }
 
             sortedEntries.forEach {
-                println(String.format("%6s %6.1f%% $%10.0f %s", it.form.ticker, it.crs, it.form.value, it.form.filingDetailUrl))
+                println(buildString {
+                    append(String.format("%6s ", it.form.ticker))
+                    if (cik == null) {
+                        append("${it.form.cik} ")
+                        append(String.format("%6.1f%% ", it.crs))
+                    }
+                    append(String.format("$%.0f ", it.form.value).padStart(11, ' '))
+                    if (cik != null) {
+                        append(it.form.date.toString())
+                        append("${it.form.ownerTitle} ")
+                        append(String.format("%b ", it.form.has10b51))
+                    }
+                    append(it.form.filingDetailUrl)
+                })
             }
         }
     }

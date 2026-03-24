@@ -72,7 +72,7 @@ class YahooFinance {
                     ).execute().use { resp ->
                         val body: JsonObject = Json.decodeFromStream(resp.body.byteStream())
 
-                        val (timestamps, closes) = let {
+                        val (timestamps, closes) = run {
                             val chart = body["chart"]
                             check(chart is JsonObject)
                             val result = chart["result"]
@@ -131,7 +131,11 @@ class YahooFinance {
                             Ticker(
                                 ticker.uppercase(),
                                 newDate,
-                                close(closes[closes.size - 1]),
+                                try {
+                                    close(closes[closes.size - 1])
+                                } catch (_: Exception) {
+                                    close(closes[closes.size - 2])
+                                },
                                 midDate,
                                 close(closes[closes.size / 2]),
                                 oldDate,
