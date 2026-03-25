@@ -100,10 +100,11 @@ class SecGovScraper : CliktCommand() {
                         append(String.format("%6.1f%% ", it.crs))
                     }
                     append(String.format("$%.0f ", it.form.value).padStart(11, ' '))
+                    append(if (it.form.hasCodeP) { "code P "} else { "" })
                     if (cik != null) {
                         append("${it.form.date} ")
                         append("${it.form.ownerTitle} ")
-                        append(String.format("%b ", it.form.has10b51))
+                        append(if (it.form.has10b51) { "10b5-1 "} else { "" })
                     }
                     append(it.form.filingDetailUrl)
                 })

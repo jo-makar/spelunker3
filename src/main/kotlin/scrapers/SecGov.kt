@@ -226,6 +226,8 @@ class SecGov {
                 .joinToString()
 
             val has10b51 = doc.documentElement.textContent.contains("10b5-1", true)
+            val hasCodeP = doc.getElementsByTagName("transactionCode").asList()
+                .count { it.textContent.trim() == "P" } > 0
 
             var value = 0.0
             for (node in (
@@ -282,6 +284,7 @@ class SecGov {
                 value,
                 ownerTitle,
                 has10b51,
+                hasCodeP,
             )
         }
     }
@@ -295,6 +298,7 @@ class SecGov {
         val value: Double,
         val ownerTitle: String?,
         val has10b51: Boolean,
+        val hasCodeP: Boolean,
     ): Comparable<Form4> {
         override fun compareTo(other: Form4): Int = value.compareTo(other.value)
     }
