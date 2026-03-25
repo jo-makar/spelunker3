@@ -77,14 +77,18 @@ class SecGovScraper : CliktCommand() {
                     else -> false
                 }
                 if (!filter) {
-                    if (!crsByTicker.containsKey(form4.ticker)) {
-                        crsByTicker[form4.ticker] = run {
+                    val crs = crsByTicker.getOrPut(form4.ticker) {
+                        try {
                             val ticker = YahooFinance.scrapeTickers(listOf(form4.ticker)).toList().first()
                             (ticker.newClose - ticker.midClose) / ticker.midClose * 100.0 - indexTickerPctChange
+                        } catch (_: Exception) {
+                            0.0
                         }
                     }
 
-                    sortedEntries.add(Entry(form4, crsByTicker[form4.ticker]!!))
+                    if (crs >= 0.0) {
+                        sortedEntries.add(Entry(form4, crs))
+                    }
                 }
             }
 
@@ -97,7 +101,7 @@ class SecGovScraper : CliktCommand() {
                     }
                     append(String.format("$%.0f ", it.form.value).padStart(11, ' '))
                     if (cik != null) {
-                        append(it.form.date.toString())
+                        append("${it.form.date} ")
                         append("${it.form.ownerTitle} ")
                         append(String.format("%b ", it.form.has10b51))
                     }
