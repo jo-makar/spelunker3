@@ -73,6 +73,7 @@ class SecGovScraper : CliktCommand() {
 
                 val filter = when {
                     listOf("N/A", "NONE").contains(form4.ticker) -> true
+                    !form4.hasCodeP -> true
                     form4.value < threshold -> true
                     else -> false
                 }
@@ -103,6 +104,7 @@ class SecGovScraper : CliktCommand() {
                     append(if (it.form.hasCodeP) { "code P "} else { "" })
                     if (cik != null) {
                         append("${it.form.date} ")
+                        append("${it.form.ownerName} ")
                         append("${it.form.ownerTitle} ")
                         append(if (it.form.has10b51) { "10b5-1 "} else { "" })
                     }

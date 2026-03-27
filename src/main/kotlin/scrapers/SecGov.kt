@@ -145,10 +145,10 @@ class SecGov {
                     for (idx in 0 until dates.size) {
                         val date = localDate(dates[idx])
                         if (date.isBefore(startDate)) {
-                            continue
+                            break
                         }
                         if (date.isEqual(endDate) || date.isAfter(endDate)) {
-                            break
+                            continue
                         }
 
                         if (string(forms[idx]) != "4") {
@@ -220,6 +220,10 @@ class SecGov {
                 .item(0)
                 .textContent
 
+            val ownerName = doc.getElementsByTagName("rptOwnerName")
+                .item(0)
+                .textContent
+
             val ownerTitle = doc.getElementsByTagName("officerTitle").asList()
                 .map { it.textContent.trim() }
                 .filter { it.isNotEmpty() }
@@ -282,6 +286,7 @@ class SecGov {
                 ticker,
                 cik,
                 value,
+                ownerName,
                 ownerTitle,
                 has10b51,
                 hasCodeP,
@@ -296,6 +301,7 @@ class SecGov {
         val ticker: String,
         val cik: String,
         val value: Double,
+        val ownerName: String,
         val ownerTitle: String?,
         val has10b51: Boolean,
         val hasCodeP: Boolean,
